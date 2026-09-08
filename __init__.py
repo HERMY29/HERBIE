@@ -1,10 +1,10 @@
 bl_info = {
     "name": "HERBIE - UV Organizer",
     "author": "HERBIE Dev",
-    "version": (1, 5),
+    "version": (1, 7),
     "blender": (3, 0, 0),
-    "location": "View3D > N-Panel > HERBIE",
-    "description": "Herramientas de mapeo y empaque automático de UVs por material.",
+    "location": "View3D > N-Panel > Herbie",
+    "description": "Herramientas de mapeo, empaque automático y control de densidades por material.",
     "category": "UV",
 }
 
@@ -13,13 +13,30 @@ import bmesh
 import gpu
 from gpu_extras.batch import batch_for_shader
 import random
+import os
+import bpy.utils.previews
 
-# Variables globales para el manejador de dibujo
 _herbie_draw_handler = None
+custom_icons = None
 
+# -------------------------------------------------------------------
+# PROPIEDADES
+# -------------------------------------------------------------------
+
+class HERBIE_MaterialDensityItem(bpy.types.PropertyGroup):
+    material: bpy.props.PointerProperty(
+        name="Material",
+        type=bpy.types.Material,
+        description="Material a procesar"
+    )
+    density: bpy.props.FloatProperty(
+        name="Densidad",
+        default=40.0,
+        min=0.001,
+        description="Tamaño (Cube Size) para este material"
+    )
 
 class HERBIE_Properties(bpy.types.PropertyGroup):
-    # Propiedades originales
     pack_margin: bpy.props.FloatProperty(
         name="Pack Margin",
         description="Margen entre islas al empacar",
@@ -35,7 +52,6 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
         default=False
     )
     
-    # Nuevas propiedades para proyección
     mapping_type: bpy.props.EnumProperty(
         name="Método",
         description="Tipo de proyección a aplicar",
@@ -54,19 +70,34 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
     correct_aspect: bpy.props.BoolProperty(name="Correct Aspect", default=True)
     scale_to_bounds: bpy.props.BoolProperty(name="Scale to Bounds", default=False)
 
+    density_list: bpy.props.CollectionProperty(type=HERBIE_MaterialDensityItem)
+    density_list_idx: bpy.props.IntProperty()
+
+
+# -------------------------------------------------------------------
+# INTERFAZ (PANELES)
+# -------------------------------------------------------------------
 
 class HERBIE_PT_Panel(bpy.types.Panel):
-    bl_label = "HERBIE UVs"
+    bl_label = "Herbie"
     bl_idname = "HERBIE_PT_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'HERBIE'
+    bl_category = 'Herbie'
+
+    def draw_header(self, context):
+        layout = self.layout
+        global custom_icons
+        # Si la imagen existe, dibuja el icono personalizado, de lo contrario un icono nativo.
+        if custom_icons and "f4_logo" in custom_icons:
+            layout.label(text="", icon_value=custom_icons["f4_logo"].icon_id)
+        else:
+            layout.label(text="", icon='VIEW_PAN')
 
     def draw(self, context):
         layout = self.layout
         props = context.scene.herbie_props
 
-        # Sección 1: Proyección Manual
         layout.label(text="Proyección Rápida:")
         layout.prop(props, "mapping_type")
         
@@ -89,21 +120,167 @@ class HERBIE_PT_Panel(bpy.types.Panel):
             box.prop(props, "correct_aspect")
             
         layout.operator("uv.herbie_apply_mapping", text="Aplicar Proyección", icon='MOD_UVPROJECT')
-        
+        layout.separator()
+        layout.operator("uv.herbie_select_top_faces", text="Seleccionar Caras Z (Top/Bottom)", icon='TRIA_UP_BAR')
         layout.separator()
         layout.separator()
 
-        # Sección 2: Organización y Colores
         layout.label(text="Organización por Material:")
         layout.prop(props, "pack_margin")
         layout.operator("uv.herbie_organize", text="Organizar UVs por Material", icon='UV_ISLANDSEL')
         layout.prop(props, "show_material_colors", text="Color Random por Material", toggle=True)
 
 
+class HERBIE_UL_DensityList(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        split = layout.split(factor=0.6)
+        split.prop(item, "material", text="", icon='MATERIAL')
+        split.prop(item, "density", text="")
+
+
+class HERBIE_PT_DensitiesPanel(bpy.types.Panel):
+    bl_label = "Densidades"
+    bl_idname = "HERBIE_PT_DensitiesPanel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Herbie'
+    bl_parent_id = "HERBIE_PT_Panel"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.herbie_props
+
+        row = layout.row()
+        row.template_list("HERBIE_UL_DensityList", "", props, "density_list", props, "density_list_idx", rows=4)
+        
+        col = row.column(align=True)
+        col.operator("uv.herbie_density_add", text="", icon='ADD')
+        col.operator("uv.herbie_density_remove", text="", icon='REMOVE')
+
+        layout.separator()
+        layout.operator("uv.herbie_apply_densities", text="Aplicar Densidades", icon='FILE_TICK')
+
+
+# -------------------------------------------------------------------
+# OPERADORES
+# -------------------------------------------------------------------
+
+class HERBIE_OT_SelectTopFaces(bpy.types.Operator):
+    bl_idname = "uv.herbie_select_top_faces"
+    bl_label = "Seleccionar Caras Top/Bottom"
+    bl_description = "Selecciona las caras que apuntan hacia arriba y abajo (eje Z local) para facilitar rotación de UVs"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        obj = context.active_object
+        
+        if obj.mode != 'EDIT':
+            bpy.ops.object.mode_set(mode='EDIT')
+            
+        bpy.ops.mesh.select_mode(type="FACE")
+        
+        bm = bmesh.from_edit_mesh(obj.data)
+        
+        for face in bm.faces:
+            face.select = (abs(face.normal.z) > 0.707)
+            
+        bmesh.update_edit_mesh(obj.data)
+        
+        self.report({'INFO'}, "Caras superiores e inferiores seleccionadas")
+        return {'FINISHED'}
+
+
+class HERBIE_OT_DensityAdd(bpy.types.Operator):
+    bl_idname = "uv.herbie_density_add"
+    bl_label = "Añadir Material"
+    
+    def execute(self, context):
+        context.scene.herbie_props.density_list.add()
+        return {'FINISHED'}
+
+
+class HERBIE_OT_DensityRemove(bpy.types.Operator):
+    bl_idname = "uv.herbie_density_remove"
+    bl_label = "Remover Material"
+    
+    def execute(self, context):
+        props = context.scene.herbie_props
+        idx = props.density_list_idx
+        if len(props.density_list) > 0:
+            props.density_list.remove(idx)
+            if idx > 0:
+                props.density_list_idx = idx - 1
+        return {'FINISHED'}
+
+
+class HERBIE_OT_ApplyDensities(bpy.types.Operator):
+    bl_idname = "uv.herbie_apply_densities"
+    bl_label = "Aplicar Densidades de Material"
+    bl_description = "Aplica un Cube Projection a las caras de cada material en la lista con su densidad configurada"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        obj = context.active_object
+        props = context.scene.herbie_props
+        
+        if not props.density_list:
+            self.report({'WARNING'}, "La lista de densidades está vacía.")
+            return {'CANCELLED'}
+            
+        initial_mode = obj.mode
+        bpy.ops.object.mode_set(mode='EDIT')
+        bpy.ops.mesh.select_mode(type="FACE")
+        
+        bm = bmesh.from_edit_mesh(obj.data)
+        
+        processed_count = 0
+        
+        for item in props.density_list:
+            mat = item.material
+            if not mat:
+                continue
+                
+            mat_idx = -1
+            for i, slot_mat in enumerate(obj.data.materials):
+                if slot_mat == mat:
+                    mat_idx = i
+                    break
+                    
+            if mat_idx == -1:
+                continue 
+                
+            for face in bm.faces:
+                face.select = (face.material_index == mat_idx)
+            bmesh.update_edit_mesh(obj.data)
+            
+            try:
+                bpy.ops.uv.cube_project(cube_size=item.density)
+                processed_count += 1
+            except Exception as e:
+                self.report({'ERROR'}, f"Fallo en material {mat.name}: {e}")
+                
+            for face in bm.faces:
+                face.select = False
+            bmesh.update_edit_mesh(obj.data)
+            
+        bpy.ops.object.mode_set(mode=initial_mode)
+        
+        self.report({'INFO'}, f"Densidades aplicadas a {processed_count} materiales encontrados.")
+        return {'FINISHED'}
+
+
 class HERBIE_OT_ApplyMapping(bpy.types.Operator):
     bl_idname = "uv.herbie_apply_mapping"
     bl_label = "Aplicar Proyección (HERBIE)"
-    bl_description = "Aplica la proyección configurada. Afecta selección en Edit Mode o a todos los objetos seleccionados en Object Mode"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -114,60 +291,36 @@ class HERBIE_OT_ApplyMapping(bpy.types.Operator):
         props = context.scene.herbie_props
         initial_mode = context.active_object.mode
         
-        # Si estamos en Object Mode, preparar todos los objetos seleccionados
         if initial_mode == 'OBJECT':
             bpy.ops.object.mode_set(mode='EDIT')
             bpy.ops.mesh.select_mode(type="FACE")
             bpy.ops.mesh.select_all(action='SELECT')
         
-        # Aplicar el operador de proyección correspondiente
         try:
             if props.mapping_type == 'CUBE':
-                bpy.ops.uv.cube_project(
-                    cube_size=props.cube_size,
-                    correct_aspect=props.correct_aspect,
-                    scale_to_bounds=props.scale_to_bounds
-                )
+                bpy.ops.uv.cube_project(cube_size=props.cube_size, correct_aspect=props.correct_aspect, scale_to_bounds=props.scale_to_bounds)
             elif props.mapping_type == 'CYLINDER':
-                bpy.ops.uv.cylinder_project(
-                    radius=props.cyl_radius,
-                    correct_aspect=props.correct_aspect,
-                    scale_to_bounds=props.scale_to_bounds
-                )
+                bpy.ops.uv.cylinder_project(radius=props.cyl_radius, correct_aspect=props.correct_aspect, scale_to_bounds=props.scale_to_bounds)
             elif props.mapping_type == 'SPHERE':
-                bpy.ops.uv.sphere_project(
-                    correct_aspect=props.correct_aspect,
-                    scale_to_bounds=props.scale_to_bounds
-                )
+                bpy.ops.uv.sphere_project(correct_aspect=props.correct_aspect, scale_to_bounds=props.scale_to_bounds)
             elif props.mapping_type == 'VIEW':
-                bpy.ops.uv.project_from_view(
-                    camera_bounds=False,
-                    correct_aspect=props.correct_aspect,
-                    scale_to_bounds=props.scale_to_bounds
-                )
+                bpy.ops.uv.project_from_view(camera_bounds=False, correct_aspect=props.correct_aspect, scale_to_bounds=props.scale_to_bounds)
             elif props.mapping_type == 'VIEW_BOUNDS':
-                bpy.ops.uv.project_from_view(
-                    camera_bounds=False,
-                    correct_aspect=props.correct_aspect,
-                    scale_to_bounds=True
-                )
+                bpy.ops.uv.project_from_view(camera_bounds=False, correct_aspect=props.correct_aspect, scale_to_bounds=True)
         except Exception as e:
             self.report({'ERROR'}, f"Fallo al aplicar proyección: {e}")
             return {'CANCELLED'}
             
-        # Restaurar a Object Mode si se inició desde ahí
         if initial_mode == 'OBJECT':
             bpy.ops.mesh.select_all(action='DESELECT')
             bpy.ops.object.mode_set(mode='OBJECT')
             
-        self.report({'INFO'}, "Proyección aplicada exitosamente")
         return {'FINISHED'}
 
 
 class HERBIE_OT_OrganizeUVs(bpy.types.Operator):
     bl_idname = "uv.herbie_organize"
     bl_label = "Organizar UVs (HERBIE)"
-    bl_description = "Cube projection, empaque con escala por material y desplazamiento compacto"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -189,7 +342,6 @@ class HERBIE_OT_OrganizeUVs(bpy.types.Operator):
                 
         if not used_materials:
             context.scene.tool_settings.use_uv_select_sync = original_sync
-            self.report({'WARNING'}, "El objeto no tiene materiales asignados en uso.")
             return {'CANCELLED'}
 
         sorted_active_materials = sorted(list(used_materials))
@@ -224,8 +376,7 @@ class HERBIE_OT_OrganizeUVs(bpy.types.Operator):
             uv_layer = bm.loops.layers.uv.verify()
 
             for face in bm.faces:
-                is_target = (face.material_index == mat_idx)
-                face.select = is_target
+                face.select = (face.material_index == mat_idx)
             bmesh.update_edit_mesh(obj.data)
 
             override = {
@@ -249,7 +400,7 @@ class HERBIE_OT_OrganizeUVs(bpy.types.Operator):
                     bpy.ops.uv.select_all(override, action='SELECT')
                     bpy.ops.uv.pack_islands(override, margin=props.pack_margin, scale=True, rotate=False)
             except Exception as e:
-                self.report({'WARNING'}, f"Fallo al empacar material {mat_idx}: {e}")
+                pass
 
             move_x = offset_step * position_index
             bm = bmesh.from_edit_mesh(obj.data)
@@ -273,20 +424,16 @@ class HERBIE_OT_OrganizeUVs(bpy.types.Operator):
         context.scene.tool_settings.use_uv_select_sync = original_sync
         bpy.ops.object.mode_set(mode='OBJECT')
         
-        self.report({'INFO'}, f"HERBIE organizó {len(sorted_active_materials)} materiales exitosamente.")
         return {'FINISHED'}
 
 
 def draw_uv_colors():
     context = bpy.context
-    
     if not hasattr(context.scene, "herbie_props") or not context.scene.herbie_props.show_material_colors:
         return
-        
     obj = context.active_object
     if not obj or obj.type != 'MESH' or obj.mode != 'EDIT':
         return
-        
     area = context.area
     if not area or area.type != 'IMAGE_EDITOR':
         return
@@ -335,27 +482,59 @@ def draw_uv_colors():
     gpu.state.blend_set('NONE')
 
 
+# -------------------------------------------------------------------
+# REGISTRO
+# -------------------------------------------------------------------
+
+classes = (
+    HERBIE_MaterialDensityItem,
+    HERBIE_Properties,
+    HERBIE_UL_DensityList,
+    HERBIE_PT_Panel,
+    HERBIE_PT_DensitiesPanel,
+    HERBIE_OT_SelectTopFaces,
+    HERBIE_OT_DensityAdd,
+    HERBIE_OT_DensityRemove,
+    HERBIE_OT_ApplyDensities,
+    HERBIE_OT_ApplyMapping,
+    HERBIE_OT_OrganizeUVs
+)
+
 def register():
-    bpy.utils.register_class(HERBIE_Properties)
+    global custom_icons
+    custom_icons = bpy.utils.previews.new()
+    
+    script_dir = os.path.dirname(__file__) if "__file__" in locals() else bpy.utils.user_resource('SCRIPTS', path="addons")
+    icon_path = os.path.join(script_dir, "f4_logo.png")
+    
+    if os.path.exists(icon_path):
+        custom_icons.load("f4_logo", icon_path, 'IMAGE')
+
+    for cls in classes:
+        bpy.utils.register_class(cls)
+        
     bpy.types.Scene.herbie_props = bpy.props.PointerProperty(type=HERBIE_Properties)
-    bpy.utils.register_class(HERBIE_PT_Panel)
-    bpy.utils.register_class(HERBIE_OT_OrganizeUVs)
-    bpy.utils.register_class(HERBIE_OT_ApplyMapping)
     
     global _herbie_draw_handler
     _herbie_draw_handler = bpy.types.SpaceImageEditor.draw_handler_add(draw_uv_colors, (), 'WINDOW', 'POST_VIEW')
 
+
 def unregister():
+    global custom_icons
+    if custom_icons is not None:
+        bpy.utils.previews.remove(custom_icons)
+        custom_icons = None
+
     global _herbie_draw_handler
     if _herbie_draw_handler is not None:
         bpy.types.SpaceImageEditor.draw_handler_remove(_herbie_draw_handler, 'WINDOW')
         _herbie_draw_handler = None
 
-    bpy.utils.unregister_class(HERBIE_OT_ApplyMapping)
-    bpy.utils.unregister_class(HERBIE_OT_OrganizeUVs)
-    bpy.utils.unregister_class(HERBIE_PT_Panel)
+    for cls in reversed(classes):
+        bpy.utils.unregister_class(cls)
+        
     del bpy.types.Scene.herbie_props
-    bpy.utils.unregister_class(HERBIE_Properties)
+
 
 if __name__ == "__main__":
     register()
