@@ -97,10 +97,10 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
     keep_list_idx: bpy.props.IntProperty()
     
     master_material: bpy.props.PointerProperty(
-        name="Master Mat.",
-        type=bpy.types.Material,
-        description="Material maestro que reemplazará a todos los que no estén en la lista"
-    )
+            name="Material principal",
+            type=bpy.types.Material,
+            description="Material maestro que reemplazará a todos los que no estén en la lista"
+        )
 
 # -------------------------------------------------------------------
 # LISTAS (UILists)
@@ -218,7 +218,12 @@ class HERBIE_PT_KeepPanel(bpy.types.Panel):
         layout = self.layout
         props = context.scene.herbie_props
 
-        layout.prop(props, "master_material")
+        # Lógica dinámica: muestra el texto solo si no hay material asignado
+        if not props.master_material:
+            layout.prop(props, "master_material", text="Material principal")
+        else:
+            layout.prop(props, "master_material", text="")
+            
         layout.separator()
 
         row = layout.row()
@@ -233,7 +238,6 @@ class HERBIE_PT_KeepPanel(bpy.types.Panel):
 
         layout.separator()
         layout.operator("uv.herbie_clear_bake_materials", text="Borrar Materiales de Bake", icon='TRASH')
-
 # -------------------------------------------------------------------
 # OPERADORES
 # -------------------------------------------------------------------
