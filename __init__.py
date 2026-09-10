@@ -1,7 +1,7 @@
 bl_info = {
     "name": "HERBIE - UV Organizer",
     "author": "HERBIE Dev",
-    "version": (1, 7),
+    "version": (1, 11),
     "blender": (3, 0, 0),
     "location": "View3D > N-Panel > Herbie",
     "description": "Herramientas de mapeo, empaque automático y control de densidades por material.",
@@ -15,7 +15,6 @@ from gpu_extras.batch import batch_for_shader
 import random
 import os
 import bpy.utils.previews
-import base64
 import tempfile
 
 _herbie_draw_handler = None
@@ -27,49 +26,12 @@ SVG_DATA = """<?xml version="1.0" standalone="no"?>
 <svg version="1.0" xmlns="http://www.w3.org/2000/svg"
  width="1280.000000pt" height="1280.000000pt" viewBox="0 0 1280.000000 1280.000000"
  preserveAspectRatio="xMidYMid meet">
-
-<g transform="translate(0.000000,1280.000000) scale(0.100000,-0.100000)"
-fill="#ffffff" stroke="none">
-<path d="M5685 12793 c-634 -85 -1203 -234 -1790 -470 -440 -177 -1111 -595
--1584 -986 -1293 -1070 -2044 -2463 -2291 -4249 -18 -131 -20 -200 -20 -597 0
--330 4 -489 15 -602 151 -1502 719 -2766 1749 -3888 182 -198 264 -276 463
--434 867 -691 1752 -1134 2708 -1356 1032 -239 2155 -200 3300 114 355 98 487
-151 905 361 741 372 1325 793 1855 1335 451 463 778 926 1079 1529 340 683
-553 1411 678 2320 20 143 23 206 23 480 0 330 -10 464 -60 860 -63 485 -109
-686 -265 1145 -642 1884 -1793 3183 -3455 3898 -532 229 -1118 397 -1771 507
-l-234 40 -637 -1 c-351 -1 -651 -4 -668 -6z m930 -983 c1053 -64 1936 -342
-2722 -857 568 -372 1098 -909 1521 -1541 259 -387 434 -705 516 -937 603
--1715 512 -3259 -274 -4630 -283 -492 -627 -926 -1105 -1393 -233 -228 -293
--276 -535 -437 -819 -544 -1632 -851 -2510 -950 -195 -22 -680 -31 -896 -16
--669 47 -1476 251 -1973 501 -1719 861 -2746 2279 -3050 4210 -38 245 -36 771
-4 1182 181 1811 1103 3222 2755 4216 346 208 990 447 1527 566 250 56 369 77
-483 85 159 12 624 12 815 1z"/>
-<path d="M5900 11219 c-309 -19 -977 -200 -1387 -375 -806 -344 -1450 -841
--1954 -1509 -272 -360 -529 -826 -653 -1184 -551 -1589 -378 -3064 519 -4416
-195 -295 283 -404 489 -610 763 -761 1577 -1224 2470 -1405 850 -173 1758 -84
-2733 268 l182 65 6 41 c13 96 23 1022 15 1431 -9 431 -25 879 -36 961 l-5 42
--187 8 c-103 5 -945 9 -1872 9 -1540 0 -2262 -8 -2841 -31 l-156 -6 -7 23
-c-13 42 -19 440 -8 533 l10 89 1994 1996 c2310 2313 3439 3450 3446 3470 2 5
--21 29 -50 55 -39 34 -89 62 -194 106 -556 234 -1080 368 -1664 425 -192 19
--656 27 -850 14z"/>
-<path d="M9563 8538 c5 -1247 18 -2174 32 -2243 2 -11 4 -129 4 -262 l1 -243
-478 0 c456 0 1030 14 1041 26 28 27 51 762 32 1014 -36 482 -125 901 -284
-1325 -217 584 -588 1163 -1047 1639 -103 106 -125 125 -131 109 -6 -14 -8 -13
--8 9 -1 35 -44 68 -89 68 l-35 0 6 -1442z m114 1210 c-2 -18 -4 -6 -4 27 0 33
-2 48 4 33 2 -15 2 -42 0 -60z m-10 -180 c-2 -18 -4 -6 -4 27 0 33 2 48 4 33 2
--15 2 -42 0 -60z m-10 -185 c-2 -21 -4 -6 -4 32 0 39 2 55 4 38 2 -18 2 -50 0
--70z m-10 -220 c-2 -21 -4 -4 -4 37 0 41 2 58 4 38 2 -21 2 -55 0 -75z m-10
--210 c-2 -21 -4 -6 -4 32 0 39 2 55 4 38 2 -18 2 -50 0 -70z m-10 -276 c-2
--23 -3 -1 -3 48 0 50 1 68 3 42 2 -26 2 -67 0 -90z m-10 -279 c-2 -29 -3 -8
--3 47 0 55 1 79 3 53 2 -26 2 -71 0 -100z m-10 -385 c-2 -37 -3 -9 -3 62 0 72
-1 102 3 68 2 -34 2 -93 0 -130z m-10 -560 c-1 -60 -3 -11 -3 107 0 118 2 167
-3 108 2 -60 2 -156 0 -215z"/>
-<path d="M7934 8982 c-518 -531 -1923 -1938 -2525 -2529 -557 -546 -599 -591
--599 -644 0 -18 54 -19 1760 -19 l1759 0 3 418 c4 532 -7 1455 -22 1817 -18
-472 -64 1252 -73 1261 -2 2 -138 -135 -303 -304z"/>
-<path d="M9709 4553 l-106 -4 -7 -82 c-24 -314 -30 -474 -30 -872 -1 -247 3
--512 8 -589 l8 -138 50 48 c85 83 318 344 419 470 238 295 440 604 616 941 74
-142 76 146 60 172 -21 34 -46 38 -352 45 -432 11 -557 12 -666 9z"/>
+<g transform="translate(0.000000,1280.000000) scale(0.100000,-0.100000)" fill="#ffffff" stroke="none">
+<path d="M5685 12793 c-634 -85 -1203 -234 -1790 -470 -440 -177 -1111 -595 -1584 -986 -1293 -1070 -2044 -2463 -2291 -4249 -18 -131 -20 -200 -20 -597 0 -330 4 -489 15 -602 151 -1502 719 -2766 1749 -3888 182 -198 264 -276 463 -434 867 -691 1752 -1134 2708 -1356 1032 -239 2155 -200 3300 114 355 98 487 151 905 361 741 372 1325 793 1855 1335 451 463 778 926 1079 1529 340 683 553 1411 678 2320 20 143 23 206 23 480 0 330 -10 464 -60 860 -63 485 -109 686 -265 1145 -642 1884 -1793 3183 -3455 3898 -532 229 -1118 397 -1771 507 l-234 40 -637 -1 c-351 -1 -651 -4 -668 -6z m930 -983 c1053 -64 1936 -342 2722 -857 568 -372 1098 -909 1521 -1541 259 -387 434 -705 516 -937 603 -1715 512 -3259 -274 -4630 -283 -492 -627 -926 -1105 -1393 -233 -228 -293 -276 -535 -437 -819 -544 -1632 -851 -2510 -950 -195 -22 -680 -31 -896 -16 -669 47 -1476 251 -1973 501 -1719 861 -2746 2279 -3050 4210 -38 245 -36 771 4 1182 181 1811 1103 3222 2755 4216 346 208 990 447 1527 566 250 56 369 77 483 85 159 12 624 12 815 1z"/>
+<path d="M5900 11219 c-309 -19 -977 -200 -1387 -375 -806 -344 -1450 -841 -1954 -1509 -272 -360 -529 -826 -653 -1184 -551 -1589 -378 -3064 519 -4416 195 -295 283 -404 489 -610 763 -761 1577 -1224 2470 -1405 850 -173 1758 -84 2733 268 l182 65 6 41 c13 96 23 1022 15 1431 -9 431 -25 879 -36 961 l-5 42 -187 8 c-103 5 -945 9 -1872 9 -1540 0 -2262 -8 -2841 -31 l-156 -6 -7 23 c-13 42 -19 440 -8 533 l10 89 1994 1996 c2310 2313 3439 3450 3446 3470 2 5 -21 29 -50 55 -39 34 -89 62 -194 106 -556 234 -1080 368 -1664 425 -192 19 -656 27 -850 14z"/>
+<path d="M9563 8538 c5 -1247 18 -2174 32 -2243 2 -11 4 -129 4 -262 l1 -243 478 0 c456 0 1030 14 1041 26 28 27 51 762 32 1014 -36 482 -125 901 -284 1325 -217 584 -588 1163 -1047 1639 -103 106 -125 125 -131 109 -6 -14 -8 -13 -8 9 -1 35 -44 68 -89 68 l-35 0 6 -1442z m114 1210 c-2 -18 -4 -6 -4 27 0 33 2 48 4 33 2 -15 2 -42 0 -60z m-10 -180 c-2 -18 -4 -6 -4 27 0 33 2 48 4 33 2 -15 2 -42 0 -60z m-10 -185 c-2 -21 -4 -6 -4 32 0 39 2 55 4 38 2 -18 2 -50 0 -70z m-10 -220 c-2 -21 -4 -4 -4 37 0 41 2 58 4 38 2 -21 2 -55 0 -75z m-10 -210 c-2 -21 -4 -6 -4 32 0 39 2 55 4 38 2 -18 2 -50 0 -70z m-10 -276 c-2 -23 -3 -1 -3 48 0 50 1 68 3 42 2 -26 2 -67 0 -90z m-10 -279 c-2 -29 -3 -8 -3 47 0 55 1 79 3 53 2 -26 2 -71 0 -100z m-10 -385 c-2 -37 -3 -9 -3 62 0 72 1 102 3 68 2 -34 2 -93 0 -130z m-10 -560 c-1 -60 -3 -11 -3 107 0 118 2 167 3 108 2 -60 2 -156 0 -215z"/>
+<path d="M7934 8982 c-518 -531 -1923 -1938 -2525 -2529 -557 -546 -599 -591 -599 -644 0 -18 54 -19 1760 -19 l1759 0 3 418 c4 532 -7 1455 -22 1817 -18 472 -64 1252 -73 1261 -2 2 -138 -135 -303 -304z"/>
+<path d="M9709 4553 l-106 -4 -7 -82 c-24 -314 -30 -474 -30 -872 -1 -247 3 -512 8 -589 l8 -138 50 48 c85 83 318 344 419 470 238 295 440 604 616 941 74 142 76 146 60 172 -21 34 -46 38 -352 45 -432 11 -557 12 -666 9z"/>
 </g>
 </svg>"""
 
@@ -90,6 +52,13 @@ class HERBIE_MaterialDensityItem(bpy.types.PropertyGroup):
         description="Tamaño (Cube Size) para este material"
     )
 
+class HERBIE_MaterialKeepItem(bpy.types.PropertyGroup):
+    material: bpy.props.PointerProperty(
+        name="Material",
+        type=bpy.types.Material,
+        description="Material a no borrar"
+    )
+
 class HERBIE_Properties(bpy.types.PropertyGroup):
     pack_margin: bpy.props.FloatProperty(
         name="Pack Margin",
@@ -99,13 +68,11 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
         max=1.0,
         precision=3
     )
-    
     show_material_colors: bpy.props.BoolProperty(
         name="Mostrar Colores por Material",
         description="Dibuja colores aleatorios por material en el UV Editor",
         default=False
     )
-    
     mapping_type: bpy.props.EnumProperty(
         name="Método",
         description="Tipo de proyección a aplicar",
@@ -118,7 +85,6 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
         ],
         default='CUBE'
     )
-    
     cube_size: bpy.props.FloatProperty(name="Cube Size", default=1.0, min=0.001)
     cyl_radius: bpy.props.FloatProperty(name="Radius", default=1.0, min=0.001)
     correct_aspect: bpy.props.BoolProperty(name="Correct Aspect", default=True)
@@ -126,14 +92,41 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
 
     density_list: bpy.props.CollectionProperty(type=HERBIE_MaterialDensityItem)
     density_list_idx: bpy.props.IntProperty()
-
+    
+    keep_list: bpy.props.CollectionProperty(type=HERBIE_MaterialKeepItem)
+    keep_list_idx: bpy.props.IntProperty()
+    
+    master_material: bpy.props.PointerProperty(
+        name="Master Mat.",
+        type=bpy.types.Material,
+        description="Material maestro que reemplazará a todos los que no estén en la lista"
+    )
 
 # -------------------------------------------------------------------
-# INTERFAZ (PANELES)
+# LISTAS (UILists)
+# -------------------------------------------------------------------
+
+class HERBIE_UL_DensityList(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        split = layout.split(factor=0.15)
+        split.label(text=f"{index + 1}.")
+        row = split.row(align=True)
+        row.prop(item, "material", text="")
+        row.prop(item, "density", text="")
+
+class HERBIE_UL_KeepList(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        split = layout.split(factor=0.15)
+        split.label(text=f"{index + 1}.")
+        row = split.row(align=True)
+        row.prop(item, "material", text="")
+
+# -------------------------------------------------------------------
+# PANELES 
 # -------------------------------------------------------------------
 
 class HERBIE_PT_Panel(bpy.types.Panel):
-    bl_label = "Herbie"
+    bl_label = ""
     bl_idname = "HERBIE_PT_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -142,15 +135,18 @@ class HERBIE_PT_Panel(bpy.types.Panel):
     def draw_header(self, context):
         layout = self.layout
         global custom_icons
-        # Si la imagen existe, dibuja el icono personalizado, de lo contrario un icono nativo.
         if custom_icons and "f4_logo" in custom_icons:
-            layout.label(text="", icon_value=custom_icons["f4_logo"].icon_id)
+            layout.label(text=" H.E.R.B.I.E", icon_value=custom_icons["f4_logo"].icon_id)
         else:
-            layout.label(text="", icon='VIEW_PAN')
+            layout.label(text=" H.E.R.B.I.E", icon='VIEW_PAN')
 
     def draw(self, context):
         layout = self.layout
         props = context.scene.herbie_props
+
+        layout.label(text="Mapas de Bake:")
+        layout.operator("uv.herbie_prepare_bake_map", text="Preparar Mapa para Bake", icon='RENDER_STILL')
+        layout.separator()
 
         layout.label(text="Proyección Rápida:")
         layout.prop(props, "mapping_type")
@@ -175,8 +171,9 @@ class HERBIE_PT_Panel(bpy.types.Panel):
             
         layout.operator("uv.herbie_apply_mapping", text="Aplicar Proyección", icon='MOD_UVPROJECT')
         layout.separator()
+        
+        layout.label(text="Edición:")
         layout.operator("uv.herbie_select_top_faces", text="Seleccionar Caras Z (Top/Bottom)", icon='TRIA_UP_BAR')
-        layout.separator()
         layout.separator()
 
         layout.label(text="Organización por Material:")
@@ -184,21 +181,12 @@ class HERBIE_PT_Panel(bpy.types.Panel):
         layout.operator("uv.herbie_organize", text="Organizar UVs por Material", icon='UV_ISLANDSEL')
         layout.prop(props, "show_material_colors", text="Color Random por Material", toggle=True)
 
-
-class HERBIE_UL_DensityList(bpy.types.UIList):
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
-        split = layout.split(factor=0.6)
-        split.prop(item, "material", text="", icon='MATERIAL')
-        split.prop(item, "density", text="")
-
-
 class HERBIE_PT_DensitiesPanel(bpy.types.Panel):
     bl_label = "Densidades"
     bl_idname = "HERBIE_PT_DensitiesPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_category = 'Herbie'
-    bl_parent_id = "HERBIE_PT_Panel"
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -211,19 +199,49 @@ class HERBIE_PT_DensitiesPanel(bpy.types.Panel):
         col = row.column(align=True)
         col.operator("uv.herbie_density_add", text="", icon='ADD')
         col.operator("uv.herbie_density_remove", text="", icon='REMOVE')
+        col.separator()
+        col.operator("uv.herbie_density_move", text="", icon='TRIA_UP').direction = 'UP'
+        col.operator("uv.herbie_density_move", text="", icon='TRIA_DOWN').direction = 'DOWN'
 
         layout.separator()
         layout.operator("uv.herbie_apply_densities", text="Aplicar Densidades", icon='FILE_TICK')
 
+class HERBIE_PT_KeepPanel(bpy.types.Panel):
+    bl_label = "Procesador de modelo"
+    bl_idname = "HERBIE_PT_KeepPanel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Herbie'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.herbie_props
+
+        layout.prop(props, "master_material")
+        layout.separator()
+
+        row = layout.row()
+        row.template_list("HERBIE_UL_KeepList", "", props, "keep_list", props, "keep_list_idx", rows=4)
+        
+        col = row.column(align=True)
+        col.operator("uv.herbie_keep_add", text="", icon='ADD')
+        col.operator("uv.herbie_keep_remove", text="", icon='REMOVE')
+        col.separator()
+        col.operator("uv.herbie_keep_move", text="", icon='TRIA_UP').direction = 'UP'
+        col.operator("uv.herbie_keep_move", text="", icon='TRIA_DOWN').direction = 'DOWN'
+
+        layout.separator()
+        layout.operator("uv.herbie_clear_bake_materials", text="Borrar Materiales de Bake", icon='TRASH')
 
 # -------------------------------------------------------------------
 # OPERADORES
 # -------------------------------------------------------------------
 
-class HERBIE_OT_SelectTopFaces(bpy.types.Operator):
-    bl_idname = "uv.herbie_select_top_faces"
-    bl_label = "Seleccionar Caras Top/Bottom"
-    bl_description = "Selecciona las caras que apuntan hacia arriba y abajo (eje Z local) para facilitar rotación de UVs"
+class HERBIE_OT_PrepareBakeMap(bpy.types.Operator):
+    bl_idname = "uv.herbie_prepare_bake_map"
+    bl_label = "Preparar Mapa para Bake"
+    bl_description = "Conserva solo el mapa activo de render, lo nombra 'UVMap' y crea 'UVMap.001' para editar"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -232,36 +250,75 @@ class HERBIE_OT_SelectTopFaces(bpy.types.Operator):
 
     def execute(self, context):
         obj = context.active_object
+        if obj.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+        uvs = obj.data.uv_layers
+        if not uvs:
+            self.report({'WARNING'}, "El objeto no tiene mapas UV.")
+            return {'CANCELLED'}
+
+        render_uv = None
+        for uv in uvs:
+            if uv.active_render:
+                render_uv = uv
+                break
         
+        if not render_uv:
+            render_uv = uvs.active
+
+        to_remove = [uv.name for uv in uvs if uv.name != render_uv.name]
+        for name in to_remove:
+            uvs.remove(uvs[name])
+
+        render_uv.name = "UVMap"
+        render_uv.active_render = True
+
+        new_uv_name = "UVMap.001"
+        if new_uv_name not in uvs:
+            new_uv = uvs.new(name=new_uv_name)
+        else:
+            new_uv = uvs[new_uv_name]
+
+        new_uv.active = True
+        self.report({'INFO'}, "Mapa preparado para bake exitosamente.")
+        return {'FINISHED'}
+
+
+class HERBIE_OT_SelectTopFaces(bpy.types.Operator):
+    bl_idname = "uv.herbie_select_top_faces"
+    bl_label = "Seleccionar Caras Top/Bottom"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        obj = context.active_object
         if obj.mode != 'EDIT':
             bpy.ops.object.mode_set(mode='EDIT')
             
         bpy.ops.mesh.select_mode(type="FACE")
-        
         bm = bmesh.from_edit_mesh(obj.data)
         
         for face in bm.faces:
             face.select = (abs(face.normal.z) > 0.707)
             
         bmesh.update_edit_mesh(obj.data)
-        
-        self.report({'INFO'}, "Caras superiores e inferiores seleccionadas")
         return {'FINISHED'}
 
 
 class HERBIE_OT_DensityAdd(bpy.types.Operator):
     bl_idname = "uv.herbie_density_add"
     bl_label = "Añadir Material"
-    
     def execute(self, context):
         context.scene.herbie_props.density_list.add()
         return {'FINISHED'}
 
-
 class HERBIE_OT_DensityRemove(bpy.types.Operator):
     bl_idname = "uv.herbie_density_remove"
     bl_label = "Remover Material"
-    
     def execute(self, context):
         props = context.scene.herbie_props
         idx = props.density_list_idx
@@ -271,11 +328,136 @@ class HERBIE_OT_DensityRemove(bpy.types.Operator):
                 props.density_list_idx = idx - 1
         return {'FINISHED'}
 
+class HERBIE_OT_DensityMove(bpy.types.Operator):
+    bl_idname = "uv.herbie_density_move"
+    bl_label = "Mover Material"
+    direction: bpy.props.EnumProperty(items=[('UP', 'Up', ''), ('DOWN', 'Down', '')])
+    
+    def execute(self, context):
+        props = context.scene.herbie_props
+        idx = props.density_list_idx
+        lst = props.density_list
+        if self.direction == 'UP' and idx > 0:
+            lst.move(idx, idx - 1)
+            props.density_list_idx -= 1
+        elif self.direction == 'DOWN' and idx < len(lst) - 1:
+            lst.move(idx, idx + 1)
+            props.density_list_idx += 1
+        return {'FINISHED'}
+
+
+class HERBIE_OT_KeepAdd(bpy.types.Operator):
+    bl_idname = "uv.herbie_keep_add"
+    bl_label = "Añadir Material a Conservar"
+    def execute(self, context):
+        context.scene.herbie_props.keep_list.add()
+        return {'FINISHED'}
+
+class HERBIE_OT_KeepRemove(bpy.types.Operator):
+    bl_idname = "uv.herbie_keep_remove"
+    bl_label = "Remover Material"
+    def execute(self, context):
+        props = context.scene.herbie_props
+        idx = props.keep_list_idx
+        if len(props.keep_list) > 0:
+            props.keep_list.remove(idx)
+            if idx > 0:
+                props.keep_list_idx = idx - 1
+        return {'FINISHED'}
+
+class HERBIE_OT_KeepMove(bpy.types.Operator):
+    bl_idname = "uv.herbie_keep_move"
+    bl_label = "Mover Material"
+    direction: bpy.props.EnumProperty(items=[('UP', 'Up', ''), ('DOWN', 'Down', '')])
+    
+    def execute(self, context):
+        props = context.scene.herbie_props
+        idx = props.keep_list_idx
+        lst = props.keep_list
+        if self.direction == 'UP' and idx > 0:
+            lst.move(idx, idx - 1)
+            props.keep_list_idx -= 1
+        elif self.direction == 'DOWN' and idx < len(lst) - 1:
+            lst.move(idx, idx + 1)
+            props.keep_list_idx += 1
+        return {'FINISHED'}
+
+
+class HERBIE_OT_ClearBakeMaterials(bpy.types.Operator):
+    bl_idname = "uv.herbie_clear_bake_materials"
+    bl_label = "Borrar materiales de bake"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        props = context.scene.herbie_props
+        master_mat = props.master_material
+        
+        selected_objs = [obj for obj in context.selected_objects if obj.type == 'MESH']
+        
+        if not selected_objs:
+            self.report({'WARNING'}, "No hay objetos seleccionados.")
+            return {'CANCELLED'}
+            
+        if not master_mat:
+            self.report({'WARNING'}, "Asigna un Master Mat. primero.")
+            return {'CANCELLED'}
+        
+        # Nombres de los materiales a proteger
+        mats_to_keep_names = {item.material.name for item in props.keep_list if item.material}
+        procesados = 0
+        
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+        
+        original_active = context.view_layer.objects.active
+        
+        for obj in selected_objs:
+            context.view_layer.objects.active = obj
+            
+            # Paso 1: Asegurar que el objeto tiene el Master Material asignado
+            master_idx = -1
+            for i, slot in enumerate(obj.material_slots):
+                if slot.material == master_mat:
+                    master_idx = i
+                    break
+            
+            if master_idx == -1:
+                obj.data.materials.append(master_mat)
+                master_idx = len(obj.material_slots) - 1
+                
+            # Paso 2: Identificar los índices de los materiales que SÍ están en la lista
+            keep_indices = {master_idx}
+            for i, slot in enumerate(obj.material_slots):
+                if slot.material and slot.material.name in mats_to_keep_names:
+                    keep_indices.add(i)
+                    
+            # Paso 3: Asignar el Master Mat a las caras de materiales no protegidos
+            for poly in obj.data.polygons:
+                if poly.material_index not in keep_indices:
+                    poly.material_index = master_idx
+                    
+            # Paso 4: Purgar los slots que ya no tienen geometría asignada
+            used_indices = {poly.material_index for poly in obj.data.polygons}
+            
+            # Borrar de atrás hacia adelante para no corromper los índices durante el proceso
+            for i in range(len(obj.material_slots) - 1, -1, -1):
+                if i not in used_indices:
+                    obj.active_material_index = i
+                    bpy.ops.object.material_slot_remove()
+                    
+            procesados += 1
+            
+        context.view_layer.objects.active = original_active
+        self.report({'INFO'}, f"Procesador aplicado a {procesados} objetos.")
+        return {'FINISHED'}
 
 class HERBIE_OT_ApplyDensities(bpy.types.Operator):
     bl_idname = "uv.herbie_apply_densities"
     bl_label = "Aplicar Densidades de Material"
-    bl_description = "Aplica un Cube Projection a las caras de cada material en la lista con su densidad configurada"
     bl_options = {'REGISTER', 'UNDO'}
 
     @classmethod
@@ -287,21 +469,18 @@ class HERBIE_OT_ApplyDensities(bpy.types.Operator):
         props = context.scene.herbie_props
         
         if not props.density_list:
-            self.report({'WARNING'}, "La lista de densidades está vacía.")
             return {'CANCELLED'}
             
         initial_mode = obj.mode
         bpy.ops.object.mode_set(mode='EDIT')
         bpy.ops.mesh.select_mode(type="FACE")
-        
         bm = bmesh.from_edit_mesh(obj.data)
         
         processed_count = 0
         
         for item in props.density_list:
             mat = item.material
-            if not mat:
-                continue
+            if not mat: continue
                 
             mat_idx = -1
             for i, slot_mat in enumerate(obj.data.materials):
@@ -309,8 +488,7 @@ class HERBIE_OT_ApplyDensities(bpy.types.Operator):
                     mat_idx = i
                     break
                     
-            if mat_idx == -1:
-                continue 
+            if mat_idx == -1: continue 
                 
             for face in bm.faces:
                 face.select = (face.material_index == mat_idx)
@@ -319,16 +497,14 @@ class HERBIE_OT_ApplyDensities(bpy.types.Operator):
             try:
                 bpy.ops.uv.cube_project(cube_size=item.density)
                 processed_count += 1
-            except Exception as e:
-                self.report({'ERROR'}, f"Fallo en material {mat.name}: {e}")
+            except Exception:
+                pass
                 
             for face in bm.faces:
                 face.select = False
             bmesh.update_edit_mesh(obj.data)
             
         bpy.ops.object.mode_set(mode=initial_mode)
-        
-        self.report({'INFO'}, f"Densidades aplicadas a {processed_count} materiales encontrados.")
         return {'FINISHED'}
 
 
@@ -361,8 +537,7 @@ class HERBIE_OT_ApplyMapping(bpy.types.Operator):
                 bpy.ops.uv.project_from_view(camera_bounds=False, correct_aspect=props.correct_aspect, scale_to_bounds=props.scale_to_bounds)
             elif props.mapping_type == 'VIEW_BOUNDS':
                 bpy.ops.uv.project_from_view(camera_bounds=False, correct_aspect=props.correct_aspect, scale_to_bounds=True)
-        except Exception as e:
-            self.report({'ERROR'}, f"Fallo al aplicar proyección: {e}")
+        except Exception:
             return {'CANCELLED'}
             
         if initial_mode == 'OBJECT':
@@ -453,7 +628,7 @@ class HERBIE_OT_OrganizeUVs(bpy.types.Operator):
                 else:
                     bpy.ops.uv.select_all(override, action='SELECT')
                     bpy.ops.uv.pack_islands(override, margin=props.pack_margin, scale=True, rotate=False)
-            except Exception as e:
+            except Exception:
                 pass
 
             move_x = offset_step * position_index
@@ -492,7 +667,11 @@ def draw_uv_colors():
     if not area or area.type != 'IMAGE_EDITOR':
         return
 
-    bm = bmesh.from_edit_mesh(obj.data)
+    try:
+        bm = bmesh.from_edit_mesh(obj.data)
+    except Exception:
+        return
+
     uv_layer = bm.loops.layers.uv.active
     if not uv_layer:
         return
@@ -502,23 +681,26 @@ def draw_uv_colors():
 
     def get_color(idx):
         random.seed(idx + 100)
-        return (random.uniform(0.2, 1.0), random.uniform(0.2, 1.0), random.uniform(0.2, 1.0), 0.4)
+        return (random.uniform(0.3, 1.0), random.uniform(0.3, 1.0), random.uniform(0.3, 1.0), 0.5)
 
-    for face in bm.faces:
-        mat_idx = face.material_index
+    loop_tris = bm.calc_loop_triangles()
+    for tri in loop_tris:
+        # Aquí sucede la magia de estabilidad: 
+        # Si la cara está seleccionada, no se dibuja su color.
+        # De esta manera puedes moverla libremente y el GPU no dibujará "picos de basura" mientras la arrastras.
+        if tri[0].face.select:
+            continue
+            
+        mat_idx = tri[0].face.material_index
         col = get_color(mat_idx)
         
-        loops = face.loops
-        if len(loops) >= 3:
-            uv0 = loops[0][uv_layer].uv
-            for i in range(1, len(loops) - 1):
-                coords.append((uv0.x, uv0.y))
-                coords.append((loops[i][uv_layer].uv.x, loops[i][uv_layer].uv.y))
-                coords.append((loops[i+1][uv_layer].uv.x, loops[i+1][uv_layer].uv.y))
-                
-                colors.append(col)
-                colors.append(col)
-                colors.append(col)
+        coords.append((tri[0][uv_layer].uv.x, tri[0][uv_layer].uv.y))
+        coords.append((tri[1][uv_layer].uv.x, tri[1][uv_layer].uv.y))
+        coords.append((tri[2][uv_layer].uv.x, tri[2][uv_layer].uv.y))
+        
+        colors.append(col)
+        colors.append(col)
+        colors.append(col)
 
     if not coords:
         return
@@ -535,24 +717,28 @@ def draw_uv_colors():
     batch.draw(shader)
     gpu.state.blend_set('NONE')
 
-
 # -------------------------------------------------------------------
 # REGISTRO
 # -------------------------------------------------------------------
 
-# Código Base64 del logo de los 4 Fantásticos
-logo_base64 = b"""
-iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAD8UlEQVR4nO2d23LbMBBD1538/y+7Dx3N2KwV87IXgMR5TlosAFG0FEtmQgghhBBCCCGEEEKI/XlUC8jg+Xw+Z3/38Xhs7dF2w62E3ctOpaAfJCPwbzAXglI4Quh3sJWBSixy8C0sRaAQyRR8C3oRoMUxB9+CWgRIUTsF34JWBCgxkcHPGI+mJwIIEWa+Zkeay6KzW0O1ALN1UyuNZNZuVlwAdvNeYZ2F7shBCv0OptlKzJwxiCH4FoY5/2T+Z2YcpniB9snjE6nGjg6HFvyI/lY76uxpKwCqAb1kb/KyVoIUk1eOHAS8T1tIfoSvAEjDzhBxJI7MGb0ShBZA4d+DUoKwAij87yCUIKQACr+f6hKkXwd45fTwLyp9cC9Ar4EK/51eP7w1uhZA4a9RUQK3Aih8H7JLkLoHUPh9ZPrkUgBEE3tg1X3hoT9tBUA7+tHDp7kZ1GOkwp+jx7fVWUqvA1TAEn4WSwVgO/oZw49eBUJXAIXvQ6SP0wVgMpRJ6yyzM4atAChH/y7hR/k5VQAWU1l0ejEz77afAk4Lf5aQAlQv/7uGH+HrcAHQzUXXF83o/O4rAPMXNRnw9nebPcAJ4UewRQEU/jxDBUA0GlFTNSOeuK4A2ef/U8P39Jn2FHBq+N5QFkDh+0FXAIXvS3cBEIxH0MBCr1duK0D0BlDhv+PlN8UpQOHHAV8AhR8LdAEUfjywBVD4OUAWQOHnAVcAhZ8LVAEUfj4wBVD4NUAUQOHXUV4AhV9LaQEUfj1lBVD4GKQ/I2j0Z8Vn0p8R5HX3SeHn0JtX6ilA4eMB+74AkcOP9z+ooP+x4gPdY+IuFH4OZU8Krf7Wr+hjJKfyK4GiFhXgcFQAMrz3WcMF0D4Am9F8tAIQEfEpSwU4nKkC6DSAyUwuWgFIiLrItnQkfxO120oxEoL37FFew7w5VNwT6eNSATJeaHA60Y/k1x7gcJYLoFUgjowXcugPQkDJ8sulALvt9lnw8F1/EwhIpk/pzwhSCX6n1x/IZwSpBGtkh29W+Lh4leCdivDN9N1ACCp9KH9lzOklqLy/YAby2rhTS1AdvhnQm0NPKwFC+GYJewCV4H9QwjdL2gSOlmDXIozOlnGFNe1TwOgwu5VgdJ6sy+upHwNnSsBehJkZaL8c2sPMcKwlmNGdfWON7iWPDHcemWajfscvUhlYZ4EwkNU8M27tZiAFMPM9z0eayqKzW0O1gFciN3tom0+E8M3ACnDBuuvvASX4CygxLTsVAS34C0hRLcxFQA3+AlpcC1MR0IO/oBDZglwEluAvqMR+AqEMbKG/Qiv8joxCMAfess0gv7FSip3CFkIIIYQQQgghhBAH8xcZfsANFw2V8AAAAABJRU5ErkJggg==
-"""
 classes = (
     HERBIE_MaterialDensityItem,
+    HERBIE_MaterialKeepItem,
     HERBIE_Properties,
     HERBIE_UL_DensityList,
+    HERBIE_UL_KeepList,
     HERBIE_PT_Panel,
     HERBIE_PT_DensitiesPanel,
+    HERBIE_PT_KeepPanel,
+    HERBIE_OT_PrepareBakeMap,
     HERBIE_OT_SelectTopFaces,
     HERBIE_OT_DensityAdd,
     HERBIE_OT_DensityRemove,
+    HERBIE_OT_DensityMove,
+    HERBIE_OT_KeepAdd,
+    HERBIE_OT_KeepRemove,
+    HERBIE_OT_KeepMove,
+    HERBIE_OT_ClearBakeMaterials,
     HERBIE_OT_ApplyDensities,
     HERBIE_OT_ApplyMapping,
     HERBIE_OT_OrganizeUVs
@@ -577,6 +763,7 @@ def register():
     
     global _herbie_draw_handler
     _herbie_draw_handler = bpy.types.SpaceImageEditor.draw_handler_add(draw_uv_colors, (), 'WINDOW', 'POST_VIEW')
+
 def unregister():
     global custom_icons
     if custom_icons is not None:
