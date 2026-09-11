@@ -1,7 +1,7 @@
 bl_info = {
     "name": "HERBIE - UV Organizer",
     "author": "HERBIE Dev",
-    "version": (1, 14),
+    "version": (1, 15),
     "blender": (3, 0, 0),
     "location": "View3D > N-Panel > H.E.R.B.I.E",
     "description": "Herramientas de mapeo, empaque automático y control de densidades por material.",
@@ -36,22 +36,37 @@ SVG_DATA = """<?xml version="1.0" standalone="no"?>
 </svg>"""
 
 # -------------------------------------------------------------------
-# PROPIEDADES
+# ACTUALIZACIÓN EN VIVO (MR FANTASTIC)
 # -------------------------------------------------------------------
 
-def update_fantastic_percentage(self, context):
-    obj = context.active_object
-    if not obj or obj.type != 'MESH': 
-        return
-    total_others = 0.0
-    for slot in obj.material_slots:
-        mat = slot.material
-        if mat and mat != self:
-            total_others += mat.fantastic_percentage
+def update_fantastic_percs(self, context):
+    """Callback que asegura que los porcentajes no pasen del 100% y sea individual por objeto."""
+    if 'prev_fantastic_percs' not in self:
+        self['prev_fantastic_percs'] = [0.0] * 32
+        
+    prev = self['prev_fantastic_percs']
+    curr = list(self.fantastic_percs)
+    
+    changed_idx = -1
+    for i in range(32):
+        if abs(curr[i] - prev[i]) > 0.0001:
+            changed_idx = i
+            break
             
-    max_allowed = max(0.0, 100.0 - total_others)
-    if self.fantastic_percentage > max_allowed:
-        self.fantastic_percentage = max_allowed
+    if changed_idx != -1:
+        total_others = sum(curr) - curr[changed_idx]
+        if total_others + curr[changed_idx] > 100.0:
+            allowed = max(0.0, 100.0 - total_others)
+            # Prevenir recursión infinita
+            if abs(self.fantastic_percs[changed_idx] - allowed) > 0.0001:
+                self.fantastic_percs[changed_idx] = allowed
+                curr[changed_idx] = allowed
+        
+        self['prev_fantastic_percs'] = [float(x) for x in curr]
+
+# -------------------------------------------------------------------
+# PROPIEDADES
+# -------------------------------------------------------------------
 
 class HERBIE_MaterialDensityItem(bpy.types.PropertyGroup):
     material: bpy.props.PointerProperty(
@@ -128,7 +143,23 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
 # -------------------------------------------------------------------
 # LISTAS (UILists)
 # -------------------------------------------------------------------
-
+class HERBIE_UL_FantasticList(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        slot = item
+        split = layout.split(factor=0.6)
+        
+        if slot.material:
+            split.label(text=slot.name, icon='MATERIAL')
+            if index < 32:
+                # Agrupamos la propiedad y el símbolo % en una misma fila alineada
+                row = split.row(align=True)
+                row.prop(data, "fantastic_percs", index=index, text="")
+                row.label(text="%")
+            else:
+                split.label(text="Límite: 32 mats")
+        else:
+            split.label(text="Vacío", icon='MATERIAL')
+            
 class HERBIE_UL_DensityList(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         split = layout.split(factor=0.15)
@@ -244,17 +275,11 @@ class HERBIE_PT_FantasticPanel(bpy.types.Panel):
         props = context.scene.herbie_props
         obj = context.active_object
 
-        # Sincronización automática de materiales sin listas externas
-        if obj and obj.type == 'MESH' and obj.material_slots:
-            box = layout.box()
-            for slot in obj.material_slots:
-                mat = slot.material
-                if mat:
-                    row = box.row()
-                    row.label(text=mat.name, icon='MATERIAL')
-                    row.prop(mat, "fantastic_percentage", text="")
+        if obj and obj.type == 'MESH':
+            # La lista se actualiza automáticamente directo desde el objeto
+            layout.template_list("HERBIE_UL_FantasticList", "", obj, "material_slots", obj, "active_material_index", rows=5)
         else:
-            layout.label(text="Selecciona una malla con materiales.")
+            layout.label(text="Selecciona un objeto.")
 
         layout.separator()
         layout.prop(props, "fantastic_margin")
@@ -313,9 +338,10 @@ class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
         
         active_items = []
         for i, slot in enumerate(obj.material_slots):
-            mat = slot.material
-            if mat and mat.fantastic_percentage > 0:
-                active_items.append((i, mat.fantastic_percentage))
+            if i >= 32: break
+            perc = obj.fantastic_percs[i]
+            if perc > 0 and slot.material:
+                active_items.append((i, perc))
                 
         if not active_items:
             self.report({'WARNING'}, "No hay porcentajes asignados.")
@@ -671,12 +697,13 @@ class HERBIE_OT_ClearBakeMaterials(bpy.types.Operator):
         master_mat = props.master_material
         
         selected_objs = [obj for obj in context.selected_objects if obj.type == 'MESH']
+        
         if not selected_objs:
             self.report({'WARNING'}, "No hay objetos seleccionados.")
             return {'CANCELLED'}
             
         if not master_mat:
-            self.report({'WARNING'}, "Asigna un Material principal primero.")
+            self.report({'WARNING'}, "Asigna un Master Mat. primero.")
             return {'CANCELLED'}
         
         mats_to_keep_names = {item.material.name for item in props.keep_list if item.material}
@@ -990,6 +1017,7 @@ classes = (
     HERBIE_MaterialDensityItem,
     HERBIE_MaterialKeepItem,
     HERBIE_Properties,
+    HERBIE_UL_FantasticList,
     HERBIE_UL_DensityList,
     HERBIE_UL_KeepList,
     HERBIE_PT_Panel,
@@ -1025,13 +1053,14 @@ def register():
     except Exception as e:
         print("Error al cargar el icono SVG:", e)
 
-    bpy.types.Material.fantastic_percentage = bpy.props.FloatProperty(
-        name="%",
-        default=0.0,
+    # Añadimos la propiedad de porcentajes directamente en la clase Object
+    bpy.types.Object.fantastic_percs = bpy.props.FloatVectorProperty(
+        name="",
+        size=32,
         min=0.0,
         max=100.0,
-        update=update_fantastic_percentage,
-        description="Porcentaje del UV Grid a ocupar (0 a 100)"
+        update=update_fantastic_percs,
+        description="Porcentaje del UV Grid a ocupar (independiente por objeto)"
     )
 
     for cls in classes:
@@ -1057,7 +1086,7 @@ def unregister():
         bpy.utils.unregister_class(cls)
         
     del bpy.types.Scene.herbie_props
-    del bpy.types.Material.fantastic_percentage
+    del bpy.types.Object.fantastic_percs
 
 if __name__ == "__main__":
     register()
