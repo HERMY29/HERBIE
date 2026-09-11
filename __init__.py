@@ -146,6 +146,7 @@ class HERBIE_PT_Panel(bpy.types.Panel):
 
         layout.label(text="Mapas de Bake:")
         layout.operator("uv.herbie_prepare_bake_map", text="Preparar Mapa para Bake", icon='RENDER_STILL')
+        layout.operator("uv.herbie_keep_uvmap_001", text="Conservar solo UVMap.001", icon='X')
         layout.separator()
 
         layout.label(text="Proyección Rápida:")
@@ -174,13 +175,14 @@ class HERBIE_PT_Panel(bpy.types.Panel):
         
         layout.label(text="Edición:")
         layout.operator("uv.herbie_select_top_faces", text="Seleccionar Caras Z (Top/Bottom)", icon='TRIA_UP_BAR')
+        layout.operator("mesh.herbie_count_islands", text="Contar Mallas Seleccionadas", icon='MESH_DATA')
         layout.separator()
 
         layout.label(text="Organización por Material:")
         layout.prop(props, "pack_margin")
         layout.operator("uv.herbie_organize", text="Organizar UVs por Material", icon='UV_ISLANDSEL')
         layout.prop(props, "show_material_colors", text="Color Random por Material", toggle=True)
-
+        
 class HERBIE_PT_DensitiesPanel(bpy.types.Panel):
     bl_label = "Densidades"
     bl_idname = "HERBIE_PT_DensitiesPanel"
@@ -250,44 +252,123 @@ class HERBIE_OT_PrepareBakeMap(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.active_object and context.active_object.type == 'MESH'
+        return bool([obj for obj in context.selected_objects if obj.type == 'MESH'])
+
+    def execute(self, context):
+        selected_objs = [obj for obj in context.selected_objects if obj.type == 'MESH']
+        if not selected_objs:
+            return {'CANCELLED'}
+
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+        procesados = 0
+        for obj in selected_objs:
+            uvs = obj.data.uv_layers
+            if not uvs:
+                continue
+
+            render_uv = None
+            for uv in uvs:
+                if uv.active_render:
+                    render_uv = uv
+                    break
+            
+            if not render_uv:
+                render_uv = uvs.active
+
+            to_remove = [uv.name for uv in uvs if uv.name != render_uv.name]
+            for name in to_remove:
+                uvs.remove(uvs[name])
+
+            render_uv.name = "UVMap"
+            render_uv.active_render = True
+
+            new_uv_name = "UVMap.001"
+            if new_uv_name not in uvs:
+                new_uv = uvs.new(name=new_uv_name)
+            else:
+                new_uv = uvs[new_uv_name]
+
+            new_uv.active = True
+            procesados += 1
+
+        self.report({'INFO'}, f"Mapa preparado para bake en {procesados} objetos.")
+        return {'FINISHED'}
+
+
+class HERBIE_OT_KeepUVMap001(bpy.types.Operator):
+    bl_idname = "uv.herbie_keep_uvmap_001"
+    bl_label = "Conservar solo UVMap.001"
+    bl_description = "Borra todos los mapas de UV a excepción de UVMap.001 en los objetos seleccionados"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return bool([obj for obj in context.selected_objects if obj.type == 'MESH'])
+
+    def execute(self, context):
+        selected_objs = [obj for obj in context.selected_objects if obj.type == 'MESH']
+        if not selected_objs:
+            return {'CANCELLED'}
+
+        if context.mode != 'OBJECT':
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+        procesados = 0
+        for obj in selected_objs:
+            uvs = obj.data.uv_layers
+            
+            if "UVMap.001" not in uvs:
+                continue
+                
+            to_remove = [uv.name for uv in uvs if uv.name != "UVMap.001"]
+            for name in to_remove:
+                uvs.remove(uvs[name])
+                
+            uvs["UVMap.001"].active = True
+            uvs["UVMap.001"].active_render = True
+            procesados += 1
+
+        self.report({'INFO'}, f"Mapas limpios en {procesados} objetos. Solo UVMap.001 conservado.")
+        return {'FINISHED'}
+
+
+class HERBIE_OT_CountIslands(bpy.types.Operator):
+    bl_idname = "mesh.herbie_count_islands"
+    bl_label = "Contar Mallas Seleccionadas"
+    bl_description = "Calcula cuántas mallas separadas (islas) tienes seleccionadas actualmente"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.mode == 'EDIT'
 
     def execute(self, context):
         obj = context.active_object
-        if obj.mode != 'OBJECT':
-            bpy.ops.object.mode_set(mode='OBJECT')
-
-        uvs = obj.data.uv_layers
-        if not uvs:
-            self.report({'WARNING'}, "El objeto no tiene mapas UV.")
-            return {'CANCELLED'}
-
-        render_uv = None
-        for uv in uvs:
-            if uv.active_render:
-                render_uv = uv
-                break
+        bm = bmesh.from_edit_mesh(obj.data)
         
-        if not render_uv:
-            render_uv = uvs.active
-
-        to_remove = [uv.name for uv in uvs if uv.name != render_uv.name]
-        for name in to_remove:
-            uvs.remove(uvs[name])
-
-        render_uv.name = "UVMap"
-        render_uv.active_render = True
-
-        new_uv_name = "UVMap.001"
-        if new_uv_name not in uvs:
-            new_uv = uvs.new(name=new_uv_name)
-        else:
-            new_uv = uvs[new_uv_name]
-
-        new_uv.active = True
-        self.report({'INFO'}, "Mapa preparado para bake exitosamente.")
+        faces = set(f for f in bm.faces if f.select)
+        
+        if not faces:
+            self.report({'WARNING'}, "No hay geometría seleccionada para contar.")
+            return {'CANCELLED'}
+            
+        islands = 0
+        
+        while faces:
+            islands += 1
+            stack = [faces.pop()]
+            while stack:
+                face = stack.pop()
+                for edge in face.edges:
+                    for linked_face in edge.link_faces:
+                        if linked_face in faces:
+                            faces.remove(linked_face)
+                            stack.append(linked_face)
+                            
+        self.report({'INFO'}, f"Mallas (Islas) seleccionadas: {islands}")
         return {'FINISHED'}
-
 
 class HERBIE_OT_SelectTopFaces(bpy.types.Operator):
     bl_idname = "uv.herbie_select_top_faces"
@@ -735,7 +816,9 @@ classes = (
     HERBIE_PT_DensitiesPanel,
     HERBIE_PT_KeepPanel,
     HERBIE_OT_PrepareBakeMap,
+    HERBIE_OT_KeepUVMap001,
     HERBIE_OT_SelectTopFaces,
+    HERBIE_OT_CountIslands,
     HERBIE_OT_DensityAdd,
     HERBIE_OT_DensityRemove,
     HERBIE_OT_DensityMove,
