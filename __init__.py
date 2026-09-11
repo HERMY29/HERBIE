@@ -1,9 +1,9 @@
 bl_info = {
     "name": "HERBIE - UV Organizer",
     "author": "HERBIE Dev",
-    "version": (1, 13),
+    "version": (1, 15),
     "blender": (3, 0, 0),
-    "location": "View3D > N-Panel > Herbie",
+    "location": "View3D > N-Panel > H.E.R.B.I.E",
     "description": "Herramientas de mapeo, empaque automático y control de densidades por material.",
     "category": "UV",
 }
@@ -36,27 +36,37 @@ SVG_DATA = """<?xml version="1.0" standalone="no"?>
 </svg>"""
 
 # -------------------------------------------------------------------
-# PROPIEDADES
+# ACTUALIZACIÓN EN VIVO (MR FANTASTIC)
 # -------------------------------------------------------------------
 
-def update_fantastic_percentage(self, context):
-    props = context.scene.herbie_props
-    total_others = sum(item.percentage for item in props.fantastic_list if item != self)
-    max_allowed = max(0.0, 100.0 - total_others)
-    if self.percentage > max_allowed:
-        self.percentage = max_allowed
+def update_fantastic_percs(self, context):
+    """Callback que asegura que los porcentajes no pasen del 100% y sea individual por objeto."""
+    if 'prev_fantastic_percs' not in self:
+        self['prev_fantastic_percs'] = [0.0] * 32
+        
+    prev = self['prev_fantastic_percs']
+    curr = list(self.fantastic_percs)
+    
+    changed_idx = -1
+    for i in range(32):
+        if abs(curr[i] - prev[i]) > 0.0001:
+            changed_idx = i
+            break
+            
+    if changed_idx != -1:
+        total_others = sum(curr) - curr[changed_idx]
+        if total_others + curr[changed_idx] > 100.0:
+            allowed = max(0.0, 100.0 - total_others)
+            # Prevenir recursión infinita
+            if abs(self.fantastic_percs[changed_idx] - allowed) > 0.0001:
+                self.fantastic_percs[changed_idx] = allowed
+                curr[changed_idx] = allowed
+        
+        self['prev_fantastic_percs'] = [float(x) for x in curr]
 
-class HERBIE_FantasticItem(bpy.types.PropertyGroup):
-    mat_index: bpy.props.IntProperty()
-    mat_name: bpy.props.StringProperty()
-    percentage: bpy.props.FloatProperty(
-        name="%",
-        default=0.0,
-        min=0.0,
-        max=100.0,
-        update=update_fantastic_percentage,
-        description="Porcentaje del UV Grid a ocupar (0 a 100)"
-    )
+# -------------------------------------------------------------------
+# PROPIEDADES
+# -------------------------------------------------------------------
 
 class HERBIE_MaterialDensityItem(bpy.types.PropertyGroup):
     material: bpy.props.PointerProperty(
@@ -82,10 +92,10 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
     pack_margin: bpy.props.FloatProperty(
         name="Pack Margin",
         description="Margen entre islas al empacar",
-        default=0.03,
+        default=0.003,
         min=0.0,
         max=1.0,
-        precision=3
+        precision=4
     )
     show_material_colors: bpy.props.BoolProperty(
         name="Mostrar Colores por Material",
@@ -116,17 +126,15 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
     keep_list_idx: bpy.props.IntProperty()
     
     master_material: bpy.props.PointerProperty(
-        name="Master Mat.",
+        name="Material principal",
         type=bpy.types.Material,
         description="Material maestro que reemplazará a todos los que no estén en la lista"
     )
 
-    fantastic_list: bpy.props.CollectionProperty(type=HERBIE_FantasticItem)
-    fantastic_list_idx: bpy.props.IntProperty()
     fantastic_margin: bpy.props.FloatProperty(
-        name="Margen Fantastic",
-        description="Margen entre las islas de UV al empacar con Fantastic",
-        default=0.01,
+        name="Margen Mr Fantastic",
+        description="Margen entre las islas de UV al empacar con Mr Fantastic",
+        default=0.003,
         min=0.0,
         max=1.0,
         precision=4
@@ -135,13 +143,23 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
 # -------------------------------------------------------------------
 # LISTAS (UILists)
 # -------------------------------------------------------------------
-
 class HERBIE_UL_FantasticList(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        slot = item
         split = layout.split(factor=0.6)
-        split.label(text=item.mat_name, icon='MATERIAL')
-        split.prop(item, "percentage", text="")
-
+        
+        if slot.material:
+            split.label(text=slot.name, icon='MATERIAL')
+            if index < 32:
+                # Agrupamos la propiedad y el símbolo % en una misma fila alineada
+                row = split.row(align=True)
+                row.prop(data, "fantastic_percs", index=index, text="")
+                row.label(text="%")
+            else:
+                split.label(text="Límite: 32 mats")
+        else:
+            split.label(text="Vacío", icon='MATERIAL')
+            
 class HERBIE_UL_DensityList(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         split = layout.split(factor=0.15)
@@ -166,7 +184,7 @@ class HERBIE_PT_Panel(bpy.types.Panel):
     bl_idname = "HERBIE_PT_Panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'Herbie'
+    bl_category = 'H.E.R.B.I.E'
 
     def draw_header(self, context):
         layout = self.layout
@@ -224,7 +242,7 @@ class HERBIE_PT_DensitiesPanel(bpy.types.Panel):
     bl_idname = "HERBIE_PT_DensitiesPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'Herbie'
+    bl_category = 'H.E.R.B.I.E'
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -245,22 +263,25 @@ class HERBIE_PT_DensitiesPanel(bpy.types.Panel):
         layout.operator("uv.herbie_apply_densities", text="Aplicar Densidades", icon='FILE_TICK')
 
 class HERBIE_PT_FantasticPanel(bpy.types.Panel):
-    bl_label = "Fantastic UVs"
+    bl_label = "Mr Fantastic"
     bl_idname = "HERBIE_PT_FantasticPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'Herbie'
+    bl_category = 'H.E.R.B.I.E'
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
         layout = self.layout
         props = context.scene.herbie_props
+        obj = context.active_object
 
-        layout.operator("uv.herbie_fantastic_load", text="Cargar Materiales", icon='FILE_REFRESH')
+        if obj and obj.type == 'MESH':
+            # La lista se actualiza automáticamente directo desde el objeto
+            layout.template_list("HERBIE_UL_FantasticList", "", obj, "material_slots", obj, "active_material_index", rows=5)
+        else:
+            layout.label(text="Selecciona un objeto.")
+
         layout.separator()
-
-        layout.template_list("HERBIE_UL_FantasticList", "", props, "fantastic_list", props, "fantastic_list_idx", rows=5)
-
         layout.prop(props, "fantastic_margin")
         layout.separator()
         layout.operator("uv.herbie_fantastic_generate", text="Generar UVs", icon='TEXTURE')
@@ -270,7 +291,7 @@ class HERBIE_PT_KeepPanel(bpy.types.Panel):
     bl_idname = "HERBIE_PT_KeepPanel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
-    bl_category = 'Herbie'
+    bl_category = 'H.E.R.B.I.E'
     bl_options = {'DEFAULT_CLOSED'}
 
     def draw(self, context):
@@ -278,7 +299,7 @@ class HERBIE_PT_KeepPanel(bpy.types.Panel):
         props = context.scene.herbie_props
 
         if not props.master_material:
-            layout.prop(props, "master_material", text="Master Mat.")
+            layout.prop(props, "master_material", text="Material principal")
         else:
             layout.prop(props, "master_material", text="")
             
@@ -301,40 +322,6 @@ class HERBIE_PT_KeepPanel(bpy.types.Panel):
 # OPERADORES
 # -------------------------------------------------------------------
 
-class HERBIE_OT_FantasticLoad(bpy.types.Operator):
-    bl_idname = "uv.herbie_fantastic_load"
-    bl_label = "Cargar Materiales (Fantastic)"
-    bl_description = "Carga todos los materiales del objeto activo en la lista para asignarles porcentaje"
-    
-    @classmethod
-    def poll(cls, context):
-        return context.active_object and context.active_object.type == 'MESH'
-
-    def execute(self, context):
-        obj = context.active_object
-        props = context.scene.herbie_props
-        props.fantastic_list.clear()
-
-        valid_materials = []
-        for i, slot in enumerate(obj.material_slots):
-            if slot.material:
-                valid_materials.append((i, slot.material.name))
-
-        if not valid_materials:
-            self.report({'WARNING'}, "El objeto no tiene materiales asignados.")
-            return {'CANCELLED'}
-
-        eq_percentage = 100.0 / len(valid_materials)
-        for idx, name in valid_materials:
-            item = props.fantastic_list.add()
-            item.mat_index = idx
-            item.mat_name = name
-            item.percentage = eq_percentage
-            
-        self.report({'INFO'}, f"{len(valid_materials)} materiales cargados.")
-        return {'FINISHED'}
-
-
 class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
     bl_idname = "uv.herbie_fantastic_generate"
     bl_label = "Generar UVs Fantastic"
@@ -349,7 +336,13 @@ class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
         obj = context.active_object
         props = context.scene.herbie_props
         
-        active_items = [item for item in props.fantastic_list if item.percentage > 0]
+        active_items = []
+        for i, slot in enumerate(obj.material_slots):
+            if i >= 32: break
+            perc = obj.fantastic_percs[i]
+            if perc > 0 and slot.material:
+                active_items.append((i, perc))
+                
         if not active_items:
             self.report({'WARNING'}, "No hay porcentajes asignados.")
             return {'CANCELLED'}
@@ -377,26 +370,25 @@ class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
             'selectable_objects': [obj], 'selected_objects': [obj]
         }
 
-        # Calcular rectángulos (Treemap Slice)
         rects = {}
         rem_x, rem_y, rem_w, rem_h = 0.0, 0.0, 1.0, 1.0
-        remaining_perc = sum(item.percentage for item in active_items)
+        remaining_perc = sum(perc for _, perc in active_items)
         
-        sorted_items = sorted(active_items, key=lambda x: x.percentage, reverse=True)
+        sorted_items = sorted(active_items, key=lambda x: x[1], reverse=True)
         
-        for item in sorted_items:
-            ratio = item.percentage / remaining_perc if remaining_perc > 0 else 0
+        for mat_idx, perc in sorted_items:
+            ratio = perc / remaining_perc if remaining_perc > 0 else 0
             if rem_w > rem_h:
                 w = rem_w * ratio
-                rects[item.mat_index] = (rem_x, rem_y, max(0.001, w), max(0.001, rem_h))
+                rects[mat_idx] = (rem_x, rem_y, max(0.001, w), max(0.001, rem_h))
                 rem_x += w
                 rem_w -= w
             else:
                 h = rem_h * ratio
-                rects[item.mat_index] = (rem_x, rem_y, max(0.001, rem_w), max(0.001, h))
+                rects[mat_idx] = (rem_x, rem_y, max(0.001, rem_w), max(0.001, h))
                 rem_y += h
                 rem_h -= h
-            remaining_perc -= item.percentage
+            remaining_perc -= perc
 
         if obj.mode != 'EDIT':
             bpy.ops.object.mode_set(mode='EDIT')
@@ -416,7 +408,6 @@ class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
             if not has_faces:
                 continue
 
-            # PASO 1: Empacar optimizando la rotación nativamente
             try:
                 if hasattr(context, "temp_override"):
                     with context.temp_override(**override):
@@ -428,7 +419,6 @@ class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
             except Exception:
                 pass
 
-            # PASO 2: Distorsión temporal inversa para adaptar al bloque objetivo
             bm = bmesh.from_edit_mesh(obj.data)
             for face in bm.faces:
                 if face.select:
@@ -437,7 +427,6 @@ class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
                         loop[uv_layer].uv.y *= (1.0 / h)
             bmesh.update_edit_mesh(obj.data)
 
-            # PASO 3: Reempacar comprimiendo el espacio pero SIN ROTACIÓN (para no dañar la forma)
             try:
                 if hasattr(context, "temp_override"):
                     with context.temp_override(**override):
@@ -449,7 +438,6 @@ class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
             except Exception:
                 pass
 
-            # PASO 4: Restaurar el aspecto y colocar en su área final
             bm = bmesh.from_edit_mesh(obj.data)
             for face in bm.faces:
                 if face.select:
@@ -458,7 +446,6 @@ class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
                         loop[uv_layer].uv.y = (loop[uv_layer].uv.y * h) + y0
             bmesh.update_edit_mesh(obj.data)
 
-        # Restaurar estado
         bm = bmesh.from_edit_mesh(obj.data)
         for face in bm.faces:
             face.select = False
@@ -470,7 +457,7 @@ class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
         context.scene.tool_settings.use_uv_select_sync = original_sync
         bpy.ops.object.mode_set(mode='OBJECT')
         
-        self.report({'INFO'}, "Fantastic UVs generados con espacio optimizado.")
+        self.report({'INFO'}, "Mr Fantastic aplicado con éxito.")
         return {'FINISHED'}
 
 
@@ -1027,7 +1014,6 @@ def draw_uv_colors():
 # -------------------------------------------------------------------
 
 classes = (
-    HERBIE_FantasticItem,
     HERBIE_MaterialDensityItem,
     HERBIE_MaterialKeepItem,
     HERBIE_Properties,
@@ -1038,7 +1024,6 @@ classes = (
     HERBIE_PT_FantasticPanel,
     HERBIE_PT_DensitiesPanel,
     HERBIE_PT_KeepPanel,
-    HERBIE_OT_FantasticLoad,
     HERBIE_OT_FantasticGenerate,
     HERBIE_OT_PrepareBakeMap,
     HERBIE_OT_KeepUVMap001,
@@ -1068,6 +1053,16 @@ def register():
     except Exception as e:
         print("Error al cargar el icono SVG:", e)
 
+    # Añadimos la propiedad de porcentajes directamente en la clase Object
+    bpy.types.Object.fantastic_percs = bpy.props.FloatVectorProperty(
+        name="",
+        size=32,
+        min=0.0,
+        max=100.0,
+        update=update_fantastic_percs,
+        description="Porcentaje del UV Grid a ocupar (independiente por objeto)"
+    )
+
     for cls in classes:
         bpy.utils.register_class(cls)
         
@@ -1091,6 +1086,7 @@ def unregister():
         bpy.utils.unregister_class(cls)
         
     del bpy.types.Scene.herbie_props
+    del bpy.types.Object.fantastic_percs
 
 if __name__ == "__main__":
     register()
