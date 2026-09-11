@@ -1,7 +1,7 @@
 bl_info = {
     "name": "HERBIE - UV Organizer",
     "author": "HERBIE Dev",
-    "version": (1, 11),
+    "version": (1, 13),
     "blender": (3, 0, 0),
     "location": "View3D > N-Panel > Herbie",
     "description": "Herramientas de mapeo, empaque automático y control de densidades por material.",
@@ -38,6 +38,25 @@ SVG_DATA = """<?xml version="1.0" standalone="no"?>
 # -------------------------------------------------------------------
 # PROPIEDADES
 # -------------------------------------------------------------------
+
+def update_fantastic_percentage(self, context):
+    props = context.scene.herbie_props
+    total_others = sum(item.percentage for item in props.fantastic_list if item != self)
+    max_allowed = max(0.0, 100.0 - total_others)
+    if self.percentage > max_allowed:
+        self.percentage = max_allowed
+
+class HERBIE_FantasticItem(bpy.types.PropertyGroup):
+    mat_index: bpy.props.IntProperty()
+    mat_name: bpy.props.StringProperty()
+    percentage: bpy.props.FloatProperty(
+        name="%",
+        default=0.0,
+        min=0.0,
+        max=100.0,
+        update=update_fantastic_percentage,
+        description="Porcentaje del UV Grid a ocupar (0 a 100)"
+    )
 
 class HERBIE_MaterialDensityItem(bpy.types.PropertyGroup):
     material: bpy.props.PointerProperty(
@@ -97,14 +116,31 @@ class HERBIE_Properties(bpy.types.PropertyGroup):
     keep_list_idx: bpy.props.IntProperty()
     
     master_material: bpy.props.PointerProperty(
-            name="Material principal",
-            type=bpy.types.Material,
-            description="Material maestro que reemplazará a todos los que no estén en la lista"
-        )
+        name="Master Mat.",
+        type=bpy.types.Material,
+        description="Material maestro que reemplazará a todos los que no estén en la lista"
+    )
+
+    fantastic_list: bpy.props.CollectionProperty(type=HERBIE_FantasticItem)
+    fantastic_list_idx: bpy.props.IntProperty()
+    fantastic_margin: bpy.props.FloatProperty(
+        name="Margen Fantastic",
+        description="Margen entre las islas de UV al empacar con Fantastic",
+        default=0.01,
+        min=0.0,
+        max=1.0,
+        precision=4
+    )
 
 # -------------------------------------------------------------------
 # LISTAS (UILists)
 # -------------------------------------------------------------------
+
+class HERBIE_UL_FantasticList(bpy.types.UIList):
+    def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
+        split = layout.split(factor=0.6)
+        split.label(text=item.mat_name, icon='MATERIAL')
+        split.prop(item, "percentage", text="")
 
 class HERBIE_UL_DensityList(bpy.types.UIList):
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
@@ -182,7 +218,7 @@ class HERBIE_PT_Panel(bpy.types.Panel):
         layout.prop(props, "pack_margin")
         layout.operator("uv.herbie_organize", text="Organizar UVs por Material", icon='UV_ISLANDSEL')
         layout.prop(props, "show_material_colors", text="Color Random por Material", toggle=True)
-        
+
 class HERBIE_PT_DensitiesPanel(bpy.types.Panel):
     bl_label = "Densidades"
     bl_idname = "HERBIE_PT_DensitiesPanel"
@@ -208,6 +244,27 @@ class HERBIE_PT_DensitiesPanel(bpy.types.Panel):
         layout.separator()
         layout.operator("uv.herbie_apply_densities", text="Aplicar Densidades", icon='FILE_TICK')
 
+class HERBIE_PT_FantasticPanel(bpy.types.Panel):
+    bl_label = "Fantastic UVs"
+    bl_idname = "HERBIE_PT_FantasticPanel"
+    bl_space_type = 'VIEW_3D'
+    bl_region_type = 'UI'
+    bl_category = 'Herbie'
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        layout = self.layout
+        props = context.scene.herbie_props
+
+        layout.operator("uv.herbie_fantastic_load", text="Cargar Materiales", icon='FILE_REFRESH')
+        layout.separator()
+
+        layout.template_list("HERBIE_UL_FantasticList", "", props, "fantastic_list", props, "fantastic_list_idx", rows=5)
+
+        layout.prop(props, "fantastic_margin")
+        layout.separator()
+        layout.operator("uv.herbie_fantastic_generate", text="Generar UVs", icon='TEXTURE')
+
 class HERBIE_PT_KeepPanel(bpy.types.Panel):
     bl_label = "Procesador de modelo"
     bl_idname = "HERBIE_PT_KeepPanel"
@@ -220,9 +277,8 @@ class HERBIE_PT_KeepPanel(bpy.types.Panel):
         layout = self.layout
         props = context.scene.herbie_props
 
-        # Lógica dinámica: muestra el texto solo si no hay material asignado
         if not props.master_material:
-            layout.prop(props, "master_material", text="Material principal")
+            layout.prop(props, "master_material", text="Master Mat.")
         else:
             layout.prop(props, "master_material", text="")
             
@@ -240,9 +296,183 @@ class HERBIE_PT_KeepPanel(bpy.types.Panel):
 
         layout.separator()
         layout.operator("uv.herbie_clear_bake_materials", text="Borrar Materiales de Bake", icon='TRASH')
+
 # -------------------------------------------------------------------
 # OPERADORES
 # -------------------------------------------------------------------
+
+class HERBIE_OT_FantasticLoad(bpy.types.Operator):
+    bl_idname = "uv.herbie_fantastic_load"
+    bl_label = "Cargar Materiales (Fantastic)"
+    bl_description = "Carga todos los materiales del objeto activo en la lista para asignarles porcentaje"
+    
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        obj = context.active_object
+        props = context.scene.herbie_props
+        props.fantastic_list.clear()
+
+        valid_materials = []
+        for i, slot in enumerate(obj.material_slots):
+            if slot.material:
+                valid_materials.append((i, slot.material.name))
+
+        if not valid_materials:
+            self.report({'WARNING'}, "El objeto no tiene materiales asignados.")
+            return {'CANCELLED'}
+
+        eq_percentage = 100.0 / len(valid_materials)
+        for idx, name in valid_materials:
+            item = props.fantastic_list.add()
+            item.mat_index = idx
+            item.mat_name = name
+            item.percentage = eq_percentage
+            
+        self.report({'INFO'}, f"{len(valid_materials)} materiales cargados.")
+        return {'FINISHED'}
+
+
+class HERBIE_OT_FantasticGenerate(bpy.types.Operator):
+    bl_idname = "uv.herbie_fantastic_generate"
+    bl_label = "Generar UVs Fantastic"
+    bl_description = "Acomoda las UVs respetando porcentajes, maximizando el espacio sin estirar"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        return context.active_object and context.active_object.type == 'MESH'
+
+    def execute(self, context):
+        obj = context.active_object
+        props = context.scene.herbie_props
+        
+        active_items = [item for item in props.fantastic_list if item.percentage > 0]
+        if not active_items:
+            self.report({'WARNING'}, "No hay porcentajes asignados.")
+            return {'CANCELLED'}
+
+        original_sync = context.scene.tool_settings.use_uv_select_sync
+        context.scene.tool_settings.use_uv_select_sync = False
+        
+        uv_area = None
+        for area in context.screen.areas:
+            if area.type == 'IMAGE_EDITOR':
+                uv_area = area
+                break
+        
+        restructure_area = False
+        if uv_area is None:
+            context.area.type = 'IMAGE_EDITOR'
+            uv_area = context.area
+            restructure_area = True
+
+        uv_region = [r for r in uv_area.regions if r.type == 'WINDOW'][0]
+        override = {
+            'window': context.window, 'screen': context.screen,
+            'area': uv_area, 'region': uv_region, 'scene': context.scene,
+            'active_object': obj, 'edit_object': obj,
+            'selectable_objects': [obj], 'selected_objects': [obj]
+        }
+
+        # Calcular rectángulos (Treemap Slice)
+        rects = {}
+        rem_x, rem_y, rem_w, rem_h = 0.0, 0.0, 1.0, 1.0
+        remaining_perc = sum(item.percentage for item in active_items)
+        
+        sorted_items = sorted(active_items, key=lambda x: x.percentage, reverse=True)
+        
+        for item in sorted_items:
+            ratio = item.percentage / remaining_perc if remaining_perc > 0 else 0
+            if rem_w > rem_h:
+                w = rem_w * ratio
+                rects[item.mat_index] = (rem_x, rem_y, max(0.001, w), max(0.001, rem_h))
+                rem_x += w
+                rem_w -= w
+            else:
+                h = rem_h * ratio
+                rects[item.mat_index] = (rem_x, rem_y, max(0.001, rem_w), max(0.001, h))
+                rem_y += h
+                rem_h -= h
+            remaining_perc -= item.percentage
+
+        if obj.mode != 'EDIT':
+            bpy.ops.object.mode_set(mode='EDIT')
+            
+        bpy.ops.mesh.select_mode(type="FACE")
+
+        for mat_idx, (x0, y0, w, h) in rects.items():
+            bm = bmesh.from_edit_mesh(obj.data)
+            uv_layer = bm.loops.layers.uv.verify()
+            
+            has_faces = False
+            for face in bm.faces:
+                face.select = (face.material_index == mat_idx)
+                if face.select: has_faces = True
+            
+            bmesh.update_edit_mesh(obj.data)
+            if not has_faces:
+                continue
+
+            # PASO 1: Empacar optimizando la rotación nativamente
+            try:
+                if hasattr(context, "temp_override"):
+                    with context.temp_override(**override):
+                        bpy.ops.uv.select_all(action='SELECT')
+                        bpy.ops.uv.pack_islands(margin=0.0, scale=True, rotate=True)
+                else:
+                    bpy.ops.uv.select_all(override, action='SELECT')
+                    bpy.ops.uv.pack_islands(override, margin=0.0, scale=True, rotate=True)
+            except Exception:
+                pass
+
+            # PASO 2: Distorsión temporal inversa para adaptar al bloque objetivo
+            bm = bmesh.from_edit_mesh(obj.data)
+            for face in bm.faces:
+                if face.select:
+                    for loop in face.loops:
+                        loop[uv_layer].uv.x *= (1.0 / w)
+                        loop[uv_layer].uv.y *= (1.0 / h)
+            bmesh.update_edit_mesh(obj.data)
+
+            # PASO 3: Reempacar comprimiendo el espacio pero SIN ROTACIÓN (para no dañar la forma)
+            try:
+                if hasattr(context, "temp_override"):
+                    with context.temp_override(**override):
+                        bpy.ops.uv.select_all(action='SELECT')
+                        bpy.ops.uv.pack_islands(margin=props.fantastic_margin, scale=True, rotate=False)
+                else:
+                    bpy.ops.uv.select_all(override, action='SELECT')
+                    bpy.ops.uv.pack_islands(override, margin=props.fantastic_margin, scale=True, rotate=False)
+            except Exception:
+                pass
+
+            # PASO 4: Restaurar el aspecto y colocar en su área final
+            bm = bmesh.from_edit_mesh(obj.data)
+            for face in bm.faces:
+                if face.select:
+                    for loop in face.loops:
+                        loop[uv_layer].uv.x = (loop[uv_layer].uv.x * w) + x0
+                        loop[uv_layer].uv.y = (loop[uv_layer].uv.y * h) + y0
+            bmesh.update_edit_mesh(obj.data)
+
+        # Restaurar estado
+        bm = bmesh.from_edit_mesh(obj.data)
+        for face in bm.faces:
+            face.select = False
+        bmesh.update_edit_mesh(obj.data)
+
+        if restructure_area:
+            context.area.type = 'VIEW_3D'
+
+        context.scene.tool_settings.use_uv_select_sync = original_sync
+        bpy.ops.object.mode_set(mode='OBJECT')
+        
+        self.report({'INFO'}, "Fantastic UVs generados con espacio optimizado.")
+        return {'FINISHED'}
+
 
 class HERBIE_OT_PrepareBakeMap(bpy.types.Operator):
     bl_idname = "uv.herbie_prepare_bake_map"
@@ -318,7 +548,6 @@ class HERBIE_OT_KeepUVMap001(bpy.types.Operator):
         procesados = 0
         for obj in selected_objs:
             uvs = obj.data.uv_layers
-            
             if "UVMap.001" not in uvs:
                 continue
                 
@@ -349,13 +578,11 @@ class HERBIE_OT_CountIslands(bpy.types.Operator):
         bm = bmesh.from_edit_mesh(obj.data)
         
         faces = set(f for f in bm.faces if f.select)
-        
         if not faces:
             self.report({'WARNING'}, "No hay geometría seleccionada para contar.")
             return {'CANCELLED'}
             
         islands = 0
-        
         while faces:
             islands += 1
             stack = [faces.pop()]
@@ -369,6 +596,7 @@ class HERBIE_OT_CountIslands(bpy.types.Operator):
                             
         self.report({'INFO'}, f"Mallas (Islas) seleccionadas: {islands}")
         return {'FINISHED'}
+
 
 class HERBIE_OT_SelectTopFaces(bpy.types.Operator):
     bl_idname = "uv.herbie_select_top_faces"
@@ -491,7 +719,6 @@ class HERBIE_OT_ClearBakeMaterials(bpy.types.Operator):
             self.report({'WARNING'}, "Asigna un Master Mat. primero.")
             return {'CANCELLED'}
         
-        # Nombres de los materiales a proteger
         mats_to_keep_names = {item.material.name for item in props.keep_list if item.material}
         procesados = 0
         
@@ -503,7 +730,6 @@ class HERBIE_OT_ClearBakeMaterials(bpy.types.Operator):
         for obj in selected_objs:
             context.view_layer.objects.active = obj
             
-            # Paso 1: Asegurar que el objeto tiene el Master Material asignado
             master_idx = -1
             for i, slot in enumerate(obj.material_slots):
                 if slot.material == master_mat:
@@ -514,21 +740,16 @@ class HERBIE_OT_ClearBakeMaterials(bpy.types.Operator):
                 obj.data.materials.append(master_mat)
                 master_idx = len(obj.material_slots) - 1
                 
-            # Paso 2: Identificar los índices de los materiales que SÍ están en la lista
             keep_indices = {master_idx}
             for i, slot in enumerate(obj.material_slots):
                 if slot.material and slot.material.name in mats_to_keep_names:
                     keep_indices.add(i)
                     
-            # Paso 3: Asignar el Master Mat a las caras de materiales no protegidos
             for poly in obj.data.polygons:
                 if poly.material_index not in keep_indices:
                     poly.material_index = master_idx
                     
-            # Paso 4: Purgar los slots que ya no tienen geometría asignada
             used_indices = {poly.material_index for poly in obj.data.polygons}
-            
-            # Borrar de atrás hacia adelante para no corromper los índices durante el proceso
             for i in range(len(obj.material_slots) - 1, -1, -1):
                 if i not in used_indices:
                     obj.active_material_index = i
@@ -539,6 +760,7 @@ class HERBIE_OT_ClearBakeMaterials(bpy.types.Operator):
         context.view_layer.objects.active = original_active
         self.report({'INFO'}, f"Procesador aplicado a {procesados} objetos.")
         return {'FINISHED'}
+
 
 class HERBIE_OT_ApplyDensities(bpy.types.Operator):
     bl_idname = "uv.herbie_apply_densities"
@@ -562,10 +784,10 @@ class HERBIE_OT_ApplyDensities(bpy.types.Operator):
         bm = bmesh.from_edit_mesh(obj.data)
         
         processed_count = 0
-        
         for item in props.density_list:
             mat = item.material
-            if not mat: continue
+            if not mat:
+                continue
                 
             mat_idx = -1
             for i, slot_mat in enumerate(obj.data.materials):
@@ -573,7 +795,8 @@ class HERBIE_OT_ApplyDensities(bpy.types.Operator):
                     mat_idx = i
                     break
                     
-            if mat_idx == -1: continue 
+            if mat_idx == -1:
+                continue 
                 
             for face in bm.faces:
                 face.select = (face.material_index == mat_idx)
@@ -770,9 +993,6 @@ def draw_uv_colors():
 
     loop_tris = bm.calc_loop_triangles()
     for tri in loop_tris:
-        # Aquí sucede la magia de estabilidad: 
-        # Si la cara está seleccionada, no se dibuja su color.
-        # De esta manera puedes moverla libremente y el GPU no dibujará "picos de basura" mientras la arrastras.
         if tri[0].face.select:
             continue
             
@@ -807,14 +1027,19 @@ def draw_uv_colors():
 # -------------------------------------------------------------------
 
 classes = (
+    HERBIE_FantasticItem,
     HERBIE_MaterialDensityItem,
     HERBIE_MaterialKeepItem,
     HERBIE_Properties,
+    HERBIE_UL_FantasticList,
     HERBIE_UL_DensityList,
     HERBIE_UL_KeepList,
     HERBIE_PT_Panel,
+    HERBIE_PT_FantasticPanel,
     HERBIE_PT_DensitiesPanel,
     HERBIE_PT_KeepPanel,
+    HERBIE_OT_FantasticLoad,
+    HERBIE_OT_FantasticGenerate,
     HERBIE_OT_PrepareBakeMap,
     HERBIE_OT_KeepUVMap001,
     HERBIE_OT_SelectTopFaces,
